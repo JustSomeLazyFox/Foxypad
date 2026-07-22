@@ -1,0 +1,2 @@
+BasedOnStyle: LLVM  # Or LLVM, Microsoft, Chromium, etc.
+ColumnLimit: 150      # Change 120 to your preferred max line length
