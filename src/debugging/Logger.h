@@ -4,27 +4,28 @@
 
 class Logger {
 public:
-  static void log(std::string message);
-  static void info(std::string message);
-  static void error(std::string message);
-  static void warning(std::string message);
-  static void success(std::string message);
-  static void check(std::string message);
-  static void test(bool condition, std::string messageOnPass = "",
-                   std::string messageOnFail = "");
+  static void log(const std::string &message);
+  static void info(const std::string &message);
+  static void error(const std::string &message);
+  static void warning(const std::string &message);
+  static void success(const std::string &message);
+  static void check(const std::string &message);
+  static void test(bool condition, const std::string &messageOnPass = "", const std::string &messageOnFail = "");
 };
 
-enum AnsiColor {
-  BLACK = 30,
-  RED = 31,
-  GREEN = 32,
-  YELLOW = 33,
-  BLUE = 34,
-  MAGENTA = 35,
-  CYAN = 36,
-  WHITE = 97,
-  DEFAULT = 39
+// clang-format off
+enum AnsiColor { 
+  BLACK = 30, 
+  RED = 31, 
+  GREEN = 32, 
+  YELLOW = 33, 
+  BLUE = 34, 
+  MAGENTA = 35, 
+  CYAN = 36, 
+  WHITE = 97, 
+  DEFAULT = 39 
 };
+// clang-format on
 
 class AnsiConstructor {
 private:
@@ -33,7 +34,7 @@ private:
 public:
   AnsiConstructor();
   ~AnsiConstructor();
-  AnsiConstructor &text(std::string);
+  AnsiConstructor &text(const std::string &text);
   AnsiConstructor &reset();
   AnsiConstructor &bold();
   AnsiConstructor &unbold();

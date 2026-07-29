@@ -28,14 +28,23 @@ AsusTouchpadI2C::~AsusTouchpadI2C() {
     close(touchpadDeviceFileDescriptor);
 }
 
-void AsusTouchpadI2C::setNumpadState(bool shouldEnable) {
-  std::vector<uint8_t> payload = {0x05, 0x00, 0x3d, 0x03, 0x06, 0x00, 0x07, 0x00, 0x0d, 0x14, 0x03, static_cast<uint8_t>(shouldEnable ? 0x01 : 0x00),
-                                  0xad};
+void AsusTouchpadI2C::setNumpadState(bool shouldEnable, bool log) {
+  // clang-format off
+  std::vector<uint8_t> payload = {
+    0x05, 0x00, 0x3d, 0x03,
+    0x06, 0x00, 0x07, 0x00,
+    0x0d, 0x14, 0x03,
+    static_cast<uint8_t>(shouldEnable ? 0x01 : 0x00),
+    0xad
+  };
+  // clang-format on
 
   if (write(touchpadDeviceFileDescriptor, payload.data(), payload.size()) != payload.size()) {
     Logger::error("Failed to write magic packet to I2C device");
   } else {
-    Logger::info("Numpad state set to: " + std::string(shouldEnable ? "ON" : "OFF"));
+    if (log) {
+      Logger::info("Numpad state set to: " + std::string(shouldEnable ? "ON" : "OFF"));
+    }
     isNumpadEnabled = shouldEnable;
   }
 }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "vector.h"
+#include <memory>
 
 enum Pivote {
   CORNER_TOP_LEFT,
@@ -24,6 +25,7 @@ public:
   virtual Vector2D getDimensions() const = 0;
   virtual bool contains(const Vector2D &point) const = 0;
   virtual std::string toString() const = 0;
+  virtual std::unique_ptr<Shape> clone() const = 0;
   virtual ~Shape() = default;
 };
 
@@ -32,7 +34,7 @@ public:
   Rectangle() {}
   Rectangle(const Vector2D &position, const Vector2D &dimensions, Pivote pivote = CORNER_TOP_LEFT) : Shape(position, dimensions, pivote) {}
 
-  Vector2D getPosition() const {
+  Vector2D getPosition() const override {
     switch (pivote) {
     case CORNER_TOP_LEFT:
       return position;
@@ -48,17 +50,19 @@ public:
     return Vector2D();
   }
 
-  Vector2D getDimensions() const { return dimensions; }
+  Vector2D getDimensions() const override { return dimensions; }
 
-  bool contains(const Vector2D &point) const {
+  bool contains(const Vector2D &point) const override {
     Vector2D position = getPosition();
     return (point.getX() >= position.getX()) && (point.getX() <= (position.getX() + dimensions.getX())) && (point.getY() >= position.getY()) &&
            (point.getY() <= (position.getY() + dimensions.getY()));
   }
 
-  std::string toString() const {
+  std::string toString() const override {
     return "Rectangle(position: " + position.toString() + ", dimensions: " + dimensions.toString() + ", pivote: " + std::to_string(pivote) + ")";
   }
+
+  std::unique_ptr<Shape> clone() const override { return std::make_unique<Rectangle>(*this); }
 };
 
 class Circle : public Shape {
@@ -68,7 +72,7 @@ public:
   Circle() {}
   Circle(const Vector2D &position, float radius) : Shape(position, Vector2D(radius * 2, radius * 2), CENTER) { this->radius = radius; }
 
-  Vector2D getPosition() const {
+  Vector2D getPosition() const override {
     switch (pivote) {
     case CENTER:
       return position;
@@ -77,9 +81,11 @@ public:
     }
   }
 
-  Vector2D getDimensions() const { return dimensions; }
+  Vector2D getDimensions() const override { return dimensions; }
 
-  bool contains(const Vector2D &point) const { return point.distanceTo(position) <= radius; }
+  bool contains(const Vector2D &point) const override { return point.distanceTo(position) <= radius; }
 
-  std::string toString() const { return "Circle(position: " + position.toString() + ", radius: " + std::to_string(radius) + ")"; }
+  std::string toString() const override { return "Circle(position: " + position.toString() + ", radius: " + std::to_string(radius) + ")"; }
+
+  std::unique_ptr<Shape> clone() const override { return std::make_unique<Circle>(*this); }
 };

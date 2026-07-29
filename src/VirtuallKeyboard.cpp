@@ -8,7 +8,6 @@
 #include <linux/uinput.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
-#include <vector>
 
 void VirtualKeyboard::emit(int type, int code, int value) {
   struct input_event inputEvent;
@@ -21,6 +20,8 @@ void VirtualKeyboard::emit(int type, int code, int value) {
   if (write(numpadDeviceFileDescriptor, &inputEvent, sizeof(inputEvent)) < 0) {
     Logger::error("Failed to write event to uinput device");
   }
+
+  Logger::success("Sent " + std::to_string(type) + ", " + std::to_string(code) + ", " + std::to_string(value));
 }
 
 VirtualKeyboard::VirtualKeyboard() {
@@ -33,10 +34,7 @@ VirtualKeyboard::VirtualKeyboard() {
   ioctl(numpadDeviceFileDescriptor, UI_SET_EVBIT, EV_KEY);
   ioctl(numpadDeviceFileDescriptor, UI_SET_EVBIT, EV_SYN);
 
-  std::vector<int> keys = {KEY_KP0, KEY_KP1,   KEY_KP2,     KEY_KP3,       KEY_KP4,    KEY_KP5,     KEY_KP6,     KEY_KP7,        KEY_KP8,
-                           KEY_KP9, KEY_KPDOT, KEY_KPENTER, KEY_BACKSPACE, KEY_KPPLUS, KEY_KPMINUS, KEY_KPSLASH, KEY_KPASTERISK, KEY_NUMLOCK};
-
-  for (int key : keys) {
+  for (int key = 0; key <= KEY_MAX; ++key) {
     ioctl(numpadDeviceFileDescriptor, UI_SET_KEYBIT, key);
   }
 

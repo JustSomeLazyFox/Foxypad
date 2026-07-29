@@ -4,33 +4,39 @@
 #include "HardwareDetection.h"
 #include "VirtualKeyboard.h"
 #include "debugging/Logger.h"
+#include "util/config.h"
 #include "util/shape.h"
 
 #include <atomic>
 #include <chrono>
 #include <csignal>
-// #include <cstdlib>
 #include <fcntl.h>
+#include <functional>
 #include <libevdev/libevdev.h>
 #include <libudev.h>
 #include <linux/input-event-codes.h>
 #include <linux/input.h>
 #include <poll.h>
-#include <ratio>
 #include <string>
+#include <sys/ioctl.h>
+#include <sys/poll.h>
+#include <thread>
 #include <unistd.h>
 
 namespace Numberpad {
 AsusTouchpadI2C touchpadI2c{"/dev/i2c-0", 0x38};
-Rectangle numlockZone{(Vector2D(3270, 250)), (Vector2D(600, 400)), Pivote::CORNER_TOP_LEFT};
+// Rectangle numlockZone{(Vector2D(3270, 250)), (Vector2D(600, 400)), Pivote::CORNER_TOP_LEFT};
 Vector2D touchpadDimensions{};
 Vector2D currentTouchPosition{};
 
+std::chrono::time_point<std::chrono::steady_clock> lastInteractionTime;
 std::atomic<bool> shouldRunEventLoop{true};
 
 int touchpadDeviceFileDescriptor;
 bool isNumberpadActive = false;
 bool isTouchInNumlockZone = false;
+bool isTouching = false;
+bool isNumberpadCanonicallyEnabled = false;
 
 void handleProgramInterrupt(int signalNumber) {
   std::string signal;
@@ -49,11 +55,15 @@ void handleProgramInterrupt(int signalNumber) {
   shouldRunEventLoop.store(false);
 }
 
-void startNumberpadDriver() {
+void startNumberpadDriver(const std::string &configFilePath) {
   struct udev *udevContext = udev_new();
 
   VirtualKeyboard vk;
-  touchpadI2c.turnOffNumpad();
+  Config config;
+
+  initializeLuaScriptingApi(vk, config);
+  ConfigWatcher::loadConfig(configFilePath, config);
+  std::jthread autoUpdateConfig(ConfigWatcher::watchConfigFile, configFilePath, std::ref(config));
 
   std::string touchpadDevicePath = findTouchDeviceNode(udevContext);
   touchpadDeviceFileDescriptor = open(touchpadDevicePath.c_str(), O_RDONLY | O_NONBLOCK);
@@ -61,6 +71,11 @@ void startNumberpadDriver() {
   if (touchpadDeviceFileDescriptor < 0) {
     Logger::error("Failed to open touchpad device file descriptor");
     return;
+  }
+
+  touchpadI2c.turnOffNumpad();
+  if (isNumlockOn()) {
+    vk.keyPress(KEY_NUMLOCK);
   }
 
   struct libevdev *numberpadDevice = nullptr;
@@ -74,20 +89,30 @@ void startNumberpadDriver() {
   touchpadDimensions.setX(libevdev_get_abs_maximum(numberpadDevice, ABS_MT_POSITION_X));
   touchpadDimensions.setY(libevdev_get_abs_maximum(numberpadDevice, ABS_MT_POSITION_Y));
 
+  Logger::info("Touchpad dimensions: " + touchpadDimensions.toString());
+
   currentTouchPosition = Vector2D();
 
   std::signal(SIGINT, handleProgramInterrupt);
   std::signal(SIGTERM, handleProgramInterrupt);
 
-  bool alreadyDetectedNumlockHold = false;
-  auto numlockHoldTimeStart = std::chrono::steady_clock::now();
-  std::chrono::duration<double, std::milli> requiredNumlockHoldTime = std::chrono::milliseconds(1000);
+  // bool alreadyDetectedNumlockHold = false;
+  // std::chrono::steady_clock::time_point numlockHoldTimeStart = std::chrono::steady_clock::now();
+  // std::chrono::duration<double, std::milli> requiredNumlockHoldTime = std::chrono::milliseconds(config.activationTimeMilliseconds);
+
+  const Shape *lastTouchedArea = nullptr;
+  std::chrono::steady_clock::time_point currentRegionHoldTimeStart = std::chrono::steady_clock::now();
+  bool alreadyPerformedCurrentRegionAction = false;
 
   struct pollfd pollFileDescriptor;
   pollFileDescriptor.fd = touchpadDeviceFileDescriptor;
   pollFileDescriptor.events = POLLIN;
 
   while (shouldRunEventLoop.load()) {
+    if (!config.activationRegion) {
+      Logger::error("Nyo activation region specified in config. Stopping program...");
+      shouldRunEventLoop.store(false);
+    }
     int pollTimeout = isTouchInNumlockZone ? 50 : 1000;
     int pollReturnCode = poll(&pollFileDescriptor, 1, pollTimeout);
     if (pollReturnCode == -1) {
@@ -107,75 +132,233 @@ void startNumberpadDriver() {
       }
       break;
     }
-    if (pollReturnCode > 0 && ((pollFileDescriptor.revents & POLLIN))) {
+
+    // Logger::log("currentRegionHoldTime elaspeed: " + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - currentRegionHoldTimeStart).count()));
+    // Logger::log("Time since last interaction: " + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - lastInteractionTime).count()));
+    // Logger::log("Touch zone: " + (lastTouchedArea == nullptr ? "null" : lastTouchedArea->toString()));
+    // Logger::check("Already performed current region action: " + std::to_string(alreadyPerformedCurrentRegionAction));
+
+    std::chrono::duration timeSinceLastInteraction = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - lastInteractionTime);
+    // Logger::check("Time since last interaction: " + std::to_string(timeSinceLastInteraction.count()) + "s");
+    // Logger::check("Idle Timeout: " + std::to_string(config.idleTimeoutSeconds) + "s");
+    
+
+    if (isNumberpadActive && isNumberpadCanonicallyEnabled && timeSinceLastInteraction.count() >= 120) {
+      touchpadI2c.turnOnNumpad();
+      lastInteractionTime = std::chrono::steady_clock::now();
+    }
+
+    if (pollReturnCode > 0 && (pollFileDescriptor.revents & POLLIN)) {
       struct input_event inputEvent;
       while (libevdev_next_event(numberpadDevice, LIBEVDEV_READ_FLAG_NORMAL, &inputEvent) == LIBEVDEV_READ_STATUS_SUCCESS) {
         if (inputEvent.type == EV_ABS) {
-          if (inputEvent.code == ABS_MT_POSITION_X || inputEvent.code == ABS_X) {
-            currentTouchPosition.setX(inputEvent.value);
-          } else if (inputEvent.code == ABS_MT_POSITION_Y || inputEvent.code == ABS_Y) {
-            currentTouchPosition.setY(inputEvent.value);
-          }
-          // Logger::check("Position: " + currentTouchPosition.toString());
-          if (numlockZone.contains(currentTouchPosition)) {
-            isTouchInNumlockZone = true;
-          } else {
-            isTouchInNumlockZone = false;
-            numlockHoldTimeStart = std::chrono::steady_clock::now();
-          }
+          handleAbsoluteMovementChange(
+            inputEvent.code,
+            inputEvent.value,
+            currentRegionHoldTimeStart,
+            config
+          );
         } else if (inputEvent.type == EV_KEY && inputEvent.code == BTN_TOUCH) {
-          // numlockHoldTimeStart = std::chrono::steady_clock::now();
-          if (inputEvent.value == 1) {
-            numlockHoldTimeStart = std::chrono::steady_clock::now();
-            Logger::log("Touch down");
-            if (numlockZone.contains(currentTouchPosition)) {
-              isTouchInNumlockZone = true;
-              alreadyDetectedNumlockHold = false;
-              Logger::info("Touch in numlock zone");
-            } else {
-              numlockHoldTimeStart = std::chrono::steady_clock::now();
-              Logger::info("Touch not in numlock zone");
-            }
-          } else if (inputEvent.value == 0) {
-            Logger::log("Touch up");
-            isTouchInNumlockZone = false;
-            numlockHoldTimeStart = std::chrono::steady_clock::now();
-          }
+          handleTouchEvents(
+            inputEvent.value,
+            currentRegionHoldTimeStart,
+            alreadyPerformedCurrentRegionAction,
+            config,
+            lastTouchedArea,
+            currentTouchPosition,
+            numberpadDevice
+          );
         }
       }
     }
 
-    if (isTouchInNumlockZone && !alreadyDetectedNumlockHold) {
-      if (numlockZone.contains(currentTouchPosition)) {
-        auto nyow = std::chrono::steady_clock::now();
-        auto elaspedMilliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(nyow - numlockHoldTimeStart).count();
-        // Logger::check("Elasped Milliseconds: " + std::to_string(elaspedMilliseconds));
-        if (elaspedMilliseconds >= 1000) {
-          elaspedMilliseconds = -1;
-          numlockHoldTimeStart = std::chrono::steady_clock::now();
-          isNumberpadActive = !isNumberpadActive;
-          touchpadI2c.toggleNumpadState();
-          Logger::success("Toggled Numlock State!");
-
-          if (isNumberpadActive) {
-            libevdev_grab(numberpadDevice, LIBEVDEV_GRAB);
-            Logger::log("Numberpad on. Grabbed numpad device");
-          } else {
-            libevdev_grab(numberpadDevice, LIBEVDEV_UNGRAB);
-            Logger::log("Numberpad off. Ungrabbed numpad device");
-          }
-
-          alreadyDetectedNumlockHold = true;
+    if (isTouching && config.activationRegion && config.activationRegion->contains(currentTouchPosition)) {
+      Shape *numlockZone = config.activationRegion.get();
+      if (lastTouchedArea != numlockZone) {
+        alreadyPerformedCurrentRegionAction = false;
+        currentRegionHoldTimeStart = std::chrono::steady_clock::now();
+        lastTouchedArea = numlockZone;
+      }
+      auto nyow = std::chrono::steady_clock::now();
+      auto elaspedMilliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(nyow - currentRegionHoldTimeStart).count();
+      if (elaspedMilliseconds >= config.activationTimeMilliseconds && !alreadyPerformedCurrentRegionAction) {
+        isNumberpadActive = !isNumberpadActive;
+        touchpadI2c.toggleNumpadState();
+        if (isNumberpadActive) {
+          libevdev_grab(numberpadDevice, LIBEVDEV_GRAB);
+          Logger::success("Numberpad on. Grabbed numpad device");
+          isNumberpadCanonicallyEnabled = true;
+        } else {
+          libevdev_grab(numberpadDevice, LIBEVDEV_UNGRAB);
+          Logger::success("Numberpad off. Ungrabbed numpad device");
+          isNumberpadCanonicallyEnabled = false;
         }
-      } else {
-        isTouchInNumlockZone = false;
-        numlockHoldTimeStart = std::chrono::steady_clock::now();
+        alreadyPerformedCurrentRegionAction = true;
+      }
+    }
+
+    if (isNumberpadActive && config.idleTimeoutSeconds > 0) {
+      if ( timeSinceLastInteraction.count() >= config.idleTimeoutSeconds) {
+        touchpadI2c.turnOffNumpad();
+        isNumberpadActive = false;
+        Logger::info("Numberpad turned off due to inactivity");
+        if (config.toggleOffOnIdle) {
+          isNumberpadCanonicallyEnabled = false;
+          libevdev_grab(numberpadDevice, LIBEVDEV_UNGRAB);
+        }
+      }
+    }
+
+    if (!isNumberpadActive) continue;
+
+    if (config.profiles.empty()) {
+      Logger::warning("No profiles found in config");
+      continue;
+    }
+
+    auto currentProfile = config.getProfile(config.currentProfileName);
+    if (!currentProfile.has_value()) {
+      Logger::error("No profile found with name: " + config.currentProfileName);
+      continue;
+    }
+    for (const Region &region : currentProfile->get().regions) {
+      if (!region.shape) {
+        Logger::warning("Region has no shape, skipping");
+        continue;
+      }
+      Shape *shape = region.shape.get();
+      if (isTouching && shape->contains(currentTouchPosition)) {
+        if (lastTouchedArea != shape) {
+          Logger::check("last touched region is nyot the same, restarting timer");
+          alreadyPerformedCurrentRegionAction = false;
+          currentRegionHoldTimeStart = std::chrono::steady_clock::now();
+          lastTouchedArea = shape;
+          break;
+        }
+        auto nyow = std::chrono::steady_clock::now();
+        auto elaspedMilliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(nyow - currentRegionHoldTimeStart).count();
+        if (elaspedMilliseconds >= region.holdMilliseconds && !alreadyPerformedCurrentRegionAction && !region.performAfterRelease) {
+          if (region.action.has_value()) {
+            Logger::check("performing action");
+            region.action.value()();
+            Logger::check("Action performed");
+          }
+          currentRegionHoldTimeStart = std::chrono::steady_clock::now();
+          alreadyPerformedCurrentRegionAction = true;
+        }
+        break;
       }
     }
   }
+  touchpadI2c.turnOffNumpad();
   libevdev_free(numberpadDevice);
   close(touchpadDeviceFileDescriptor);
   udev_unref(udevContext);
+  ConfigWatcher::stopWatching();
   Logger::log("Touchpad driver stopped");
+}
+
+void handleAbsoluteMovementChange(unsigned short eventCode, unsigned short eventValue, std::chrono::steady_clock::time_point &currentRegionHoldTimeStart, const Config &config) {
+  if (eventCode == ABS_MT_POSITION_X || eventCode == ABS_X) {
+    currentTouchPosition.setX(eventValue);
+  } else if (eventCode == ABS_MT_POSITION_Y || eventCode == ABS_Y) {
+    currentTouchPosition.setY(eventValue);
+  }
+  lastInteractionTime = std::chrono::steady_clock::now();
+}
+
+void handleTouchEvents(
+  unsigned short eventValue, 
+  std::chrono::steady_clock::time_point &currentRegionHoldTimeStart, 
+  bool &alreadyPerformedCurrentRegionAction, 
+  const Config &config, 
+  const Shape *&lastTouchedArea, 
+  const Vector2D &currentTouchPosition,
+  struct libevdev *numberpadDevice
+) {
+  if (eventValue == 1) {
+    isTouching = true;
+    alreadyPerformedCurrentRegionAction = false;
+    currentRegionHoldTimeStart = std::chrono::steady_clock::now();
+    Logger::check("Reseting hold timer as touch just started");
+    Logger::log("Touch down");
+    if (isNumberpadActive) {
+      touchpadI2c.turnOnNumpad(false);
+    }
+    if (config.activationRegion && config.activationRegion->contains(currentTouchPosition)) {
+      lastTouchedArea = config.activationRegion.get();
+      return;
+    } else {
+      if (!isNumberpadActive) return;
+      auto currentProfile = config.getProfile(config.currentProfileName);
+      if (!currentProfile.has_value()) {
+        Logger::error("No profile found with name: " + config.currentProfileName);
+        return;
+      }
+      const Profile &profile = currentProfile->get();
+      for (const Region &region : profile.regions) {
+        if (!region.shape) {
+          Logger::warning("Region has no shape, skipping");
+          continue;
+        }
+        Shape *shape = region.shape.get();
+        if (shape->contains(currentTouchPosition)) {
+          if (region.holdMilliseconds <= 0 && !region.performAfterRelease) {
+            if (region.action.has_value()) {
+              region.action.value()();
+              alreadyPerformedCurrentRegionAction = true;
+            }
+          }
+          lastTouchedArea = shape;
+          return;
+        }
+      }
+    }
+  } else if (eventValue == 0) {
+    Logger::log("Touch up");
+    isTouching = false;
+    isTouchInNumlockZone = false;
+    if (isNumberpadActive && lastTouchedArea != nullptr) {
+      auto currentProfile = config.getProfile(config.currentProfileName);
+      if (currentProfile.has_value()) {
+        for (auto &region : currentProfile->get().regions) {
+          if (region.shape.get() == lastTouchedArea && region.performAfterRelease) {
+            if (!alreadyPerformedCurrentRegionAction) {
+              auto nyow = std::chrono::steady_clock::now();
+              auto elaspedMilliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(nyow - currentRegionHoldTimeStart).count();
+              Logger::log("Elasped ms = " + std::to_string(elaspedMilliseconds));
+              Logger::log("Region ms = " + std::to_string(region.holdMilliseconds));
+              if (elaspedMilliseconds >= region.holdMilliseconds && region.action.has_value()) {
+                region.action.value()();
+                alreadyPerformedCurrentRegionAction = true;
+              }
+            }
+            break;
+          }
+        }
+      } else {
+        Logger::error("Nyo profile found with name: " + config.currentProfileName);
+      }
+    }
+    currentRegionHoldTimeStart = std::chrono::steady_clock::now();
+    Logger::check("Resetting hold timer as touch is lifted up");
+    lastTouchedArea = nullptr;
+  }
+  if (isNumberpadCanonicallyEnabled) {
+    touchpadI2c.turnOnNumpad(false);
+    isNumberpadActive = true;
+    libevdev_grab(numberpadDevice, LIBEVDEV_GRAB);
+  }
+  lastInteractionTime = std::chrono::steady_clock::now();
+}
+
+bool isNumlockOn() {
+  unsigned long leds = 0;
+
+  if (ioctl(touchpadDeviceFileDescriptor, EVIOCGLED(sizeof(leds)), &leds) < 0) {
+    Logger::error("Failed to get leds state");
+    return false;
+  }
+  return (leds >> LED_NUML) & 1;
 }
 } // namespace Numberpad

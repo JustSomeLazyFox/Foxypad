@@ -1,28 +1,21 @@
 #include "src/Numberpad.h"
-// #include "src/VirtualKeyboard.h"
 #include "src/debugging/Logger.h"
+#include "src/util/fsutils.h"
 
+#include <cstdlib>
 #include <linux/input-event-codes.h>
+#include <string>
 #include <unistd.h>
 
 int main() {
-  // if (geteuid() != 0) {
-  //   Logger::error((new AnsiConstructor())->text("Please run the program as root using ").foreground(AnsiColor::CYAN).text("`sudo`").construct());
-  //   return 1;
-  // }
   try {
-    // VirtualKeyboard vk;
-    // Logger::info("Virtual keyboard created. Sending '5' in 3 seconds...");
-
-    // sleep(3);
-    // vk.keyPress(KEY_NUMLOCK);
-    // vk.keyPress(KEY_KPENTER);/
-    // Logger::success("Keystroke sent!");
-    Numberpad::startNumberpadDriver();
+    std::string userHome = std::getenv("HOME");
+    std::string configFilePath = userHome + "/.config/foxypad/config.lua";
+    setupProjectConfigAtPath(configFilePath);
+    Numberpad::startNumberpadDriver(configFilePath);
   } catch (const std::exception &e) {
     Logger::error(e.what());
     return 1;
   }
-
   return 0;
 }
