@@ -180,6 +180,22 @@ public:
                              .text("\t" + argument.getDescription() + "\n")
                              .construct();
         }
+        helpMessage += AnsiConstructor()
+                           .foreground(GREEN)
+                           .text("\t-v")
+                           .foreground(YELLOW)
+                           .text("\t--version")
+                           .foreground(BLUE)
+                           .text("\tDisplay the version number of the program\n")
+                           .construct();
+        helpMessage += AnsiConstructor()
+                           .foreground(GREEN)
+                           .text("\t-h")
+                           .foreground(YELLOW)
+                           .text("\t--help")
+                           .foreground(BLUE)
+                           .text("\t\tDisplay this help message\n")
+                           .construct();
         std::cout << helpMessage << std::endl;
         exit(0);
       }
