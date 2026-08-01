@@ -21,7 +21,7 @@ void VirtualKeyboard::emit(int type, int code, int value) {
     Logger::error("Failed to write event to uinput device");
   }
 
-  Logger::success("Sent " + std::to_string(type) + ", " + std::to_string(code) + ", " + std::to_string(value));
+  // Logger::success("Sent " + std::to_string(type) + ", " + std::to_string(code) + ", " + std::to_string(value));
 }
 
 VirtualKeyboard::VirtualKeyboard() {
@@ -42,10 +42,10 @@ VirtualKeyboard::VirtualKeyboard() {
   memset(&inputSetup, 0, sizeof(inputSetup));
 
   inputSetup.id.bustype = BUS_USB;
-  inputSetup.id.vendor = 0x1234;
-  inputSetup.id.product = 0x5678;
+  inputSetup.id.vendor = 0x4200;
+  inputSetup.id.product = 0x6969;
   inputSetup.id.version = 1;
-  strcpy(inputSetup.name, "Asus ROG Strix SCAR 16 Numpad");
+  strcpy(inputSetup.name, "Asus ROG Strix SCAR 16 Numberpad");
 
   ioctl(numpadDeviceFileDescriptor, UI_DEV_SETUP, &inputSetup);
 

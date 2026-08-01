@@ -43,6 +43,10 @@ bool firstRun = true;
 thread_local bool isLuaRuntimeExecuting = true;
 
 void Config::useProfile(const std::string &profileName) {
+  if (profileName == "touchpad") {
+    currentProfileName = profileName;
+    return;
+  }
   for (Profile &profile : profiles) {
     if (profile.name == profileName) {
       currentProfileName = profileName;
@@ -69,7 +73,7 @@ void Config::reset() {
   activationTimeMilliseconds = 1000;
 }
 
-void initializeLuaScriptingApi(VirtualKeyboard &virtualKeyboard, Config &config) {
+void initializeLuaScriptingApi(VirtualKeyboard &virtualKeyboard, Config &config, const std::string &configFilePath) {
   int numProfiles = 0;
 
   luaContext.open_libraries(sol::lib::base, sol::lib::math, sol::lib::string, sol::lib::table);
@@ -190,7 +194,7 @@ void initializeLuaScriptingApi(VirtualKeyboard &virtualKeyboard, Config &config)
     }
   });
 
-  luaContext.set_function("activation", [&config](sol::table args) {
+  luaContext.set_function("activation", [&config, &configFilePath](sol::table args) {
     if (!args["shape"].valid()) {
       Logger::error("Activation shape nyot specified");
     }
@@ -203,14 +207,25 @@ void initializeLuaScriptingApi(VirtualKeyboard &virtualKeyboard, Config &config)
     config.activationTimeMilliseconds = args.get_or("holdDuration", 1000);
     config.idleTimeoutSeconds = args.get_or("idleTimeoutSeconds", 30);
     config.toggleOffOnIdle = args.get_or("toggleOffOnIdle", false);
+    if (args["soundWhenEnabled"].valid()) {
+      Logger::check("soundWhenEnabled: " + args.get<std::string>("soundWhenEnabled"));
+      config.numpadEnabledBellSoundPath = getCanonicalPathRelativeTo(args.get<std::string>("soundWhenEnabled"), configFilePath);
+    } else {
+      config.numpadEnabledBellSoundPath = "";
+    }
+    if (args["soundWhenDisabled"].valid()) {
+      config.numpadDisabledBellSoundPath = getCanonicalPathRelativeTo(args.get<std::string>("soundWhenDisabled"), configFilePath);
+    } else {
+      config.numpadDisabledBellSoundPath = "";
+    }
   });
 
   luaContext.set_function("keyPress", [&virtualKeyboard](int keyCode) -> std::optional<std::function<void()>> {
-    Logger::check("Sending key press for key code: " + std::to_string(keyCode));
+    // Logger::check("Sending key press for key code: " + std::to_string(keyCode));
     if (isLuaRuntimeExecuting) {
-      Logger::check("sending code directly");
+      // Logger::check("sending code directly");
       if (isKeypadKey(keyCode)) {
-        Logger::log("Turning numlock on for a brief moment");
+        // Logger::log("Turning numlock on for a brief moment");
         virtualKeyboard.keyPress(KEY_NUMLOCK);
         virtualKeyboard.keyPress(keyCode);
         virtualKeyboard.keyPress(KEY_NUMLOCK);
@@ -219,10 +234,10 @@ void initializeLuaScriptingApi(VirtualKeyboard &virtualKeyboard, Config &config)
       }
       return std::nullopt;
     } else {
-      Logger::check("Returning Lambda function for keyPress action");
+      // Logger::check("Returning Lambda function for keyPress action");
       return [&virtualKeyboard, keyCode]() {
         if (isKeypadKey(keyCode)) {
-          Logger::log("Turning numlock on for a brief moment");
+          // Logger::log("Turning numlock on for a brief moment");
           virtualKeyboard.keyPress(KEY_NUMLOCK);
           virtualKeyboard.keyPress(keyCode);
           virtualKeyboard.keyPress(KEY_NUMLOCK);

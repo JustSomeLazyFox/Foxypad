@@ -1209,6 +1209,8 @@ function region(args) end
 ---@field holdDuration? integer Optional hold time required in milliseconds
 ---@field idleTimeoutSeconds? integer Optional duration after which, the numberpad turns off
 ---@field toggleOffOnIdle? boolean Optional toggle off the numberpad on idle (default: false)
+---@field soundWhenEnabled? string Path to the sound file that plays when the numberpad turns on
+---@field soundWhenDisabled? string Path to the sound file that plays when the numberpad turns off
 
 ---Sets the activation region and hold duration
 ---@param args ActivationOpts

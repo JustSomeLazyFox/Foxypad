@@ -3,6 +3,7 @@
 #include "../debugging/Logger.h"
 
 #include <fcntl.h>
+#include <filesystem>
 #include <string_view>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -59,3 +60,5 @@ public:
 };
 
 void setupProjectConfigAtPath(std::string configFilePath);
+
+std::string getCanonicalPathRelativeTo(std::filesystem::path filePath, std::filesystem::path relativeTo);

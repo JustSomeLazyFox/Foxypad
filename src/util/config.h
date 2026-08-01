@@ -26,6 +26,8 @@ struct Config {
   std::vector<Profile> profiles;
   std::string currentProfileName;
   std::shared_ptr<Shape> activationRegion;
+  std::string numpadEnabledBellSoundPath;
+  std::string numpadDisabledBellSoundPath;
   int activationTimeMilliseconds;
   int idleTimeoutSeconds;
   bool toggleOffOnIdle;
@@ -34,7 +36,7 @@ struct Config {
   void reset();
 };
 
-void initializeLuaScriptingApi(VirtualKeyboard &virtualKeyboard, Config &config);
+void initializeLuaScriptingApi(VirtualKeyboard &virtualKeyboard, Config &config, const std::string &configFilePath);
 
 namespace ConfigWatcher {
 extern std::atomic_bool shouldWatchFile;

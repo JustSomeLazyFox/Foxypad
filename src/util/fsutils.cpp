@@ -2,6 +2,7 @@
 
 #include "../debugging/Logger.h"
 
+#include <cstdlib>
 #include <filesystem>
 
 void setupProjectConfigAtPath(std::string configFilePath) {
@@ -16,4 +17,15 @@ void setupProjectConfigAtPath(std::string configFilePath) {
     }
     Logger::success("Created file at: " + configFilePath);
   }
+}
+
+std::string getCanonicalPathRelativeTo(std::filesystem::path filePath, std::filesystem::path relativeTo) {
+  if (filePath.string().starts_with("~/")) {
+    std::filesystem::path canonicalPath = std::string(getenv("HOME")) + filePath.string().substr(1);
+    return std::filesystem::canonical(canonicalPath).string();
+  } else if (filePath.string().starts_with(".")) {
+    std::filesystem::path baseDirectory = std::filesystem::is_directory(relativeTo) ? relativeTo : relativeTo.parent_path();
+    return std::filesystem::weakly_canonical(baseDirectory / filePath).string();
+  }
+  return std::filesystem::weakly_canonical(filePath).string();
 }

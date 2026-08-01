@@ -15,7 +15,7 @@ typedef struct {
   std::unique_ptr<Shape> region;
   int keyCode;
 } KeyZone;
-void startNumberpadDriver(const std::string &configFilePath);
+void startNumberpadDriver(const std::string &configFilePath, std::string_view i2cDevice, int i2cAddress, bool isGenericTouchpad);
 void handleProgramInterrupt(int signalNumber);
 // clang-format off
 void handleAbsoluteMovementChange(

@@ -4,6 +4,7 @@
 #include "HardwareDetection.h"
 #include "VirtualKeyboard.h"
 #include "debugging/Logger.h"
+#include "util/cmdutils.h"
 #include "util/config.h"
 #include "util/shape.h"
 
@@ -24,8 +25,7 @@
 #include <unistd.h>
 
 namespace Numberpad {
-AsusTouchpadI2C touchpadI2c{"/dev/i2c-0", 0x38};
-// Rectangle numlockZone{(Vector2D(3270, 250)), (Vector2D(600, 400)), Pivote::CORNER_TOP_LEFT};
+AsusTouchpadI2C touchpadI2c;
 Vector2D touchpadDimensions{};
 Vector2D currentTouchPosition{};
 
@@ -55,13 +55,15 @@ void handleProgramInterrupt(int signalNumber) {
   shouldRunEventLoop.store(false);
 }
 
-void startNumberpadDriver(const std::string &configFilePath) {
+void startNumberpadDriver(const std::string &configFilePath, std::string_view i2cDevice, int i2cAddress, bool isGenericTouchpad) {
   struct udev *udevContext = udev_new();
 
   VirtualKeyboard vk;
   Config config;
 
-  initializeLuaScriptingApi(vk, config);
+  touchpadI2c.initialize(std::string(i2cDevice), i2cAddress, isGenericTouchpad);
+
+  initializeLuaScriptingApi(vk, config, configFilePath);
   ConfigWatcher::loadConfig(configFilePath, config);
   std::jthread autoUpdateConfig(ConfigWatcher::watchConfigFile, configFilePath, std::ref(config));
 
@@ -110,7 +112,7 @@ void startNumberpadDriver(const std::string &configFilePath) {
 
   while (shouldRunEventLoop.load()) {
     if (!config.activationRegion) {
-      Logger::error("Nyo activation region specified in config. Stopping program...");
+      Logger::severe("Nyo activation region specified in config. Stopping program...");
       shouldRunEventLoop.store(false);
     }
     int pollTimeout = isTouchInNumlockZone ? 50 : 1000;
@@ -185,12 +187,19 @@ void startNumberpadDriver(const std::string &configFilePath) {
         isNumberpadActive = !isNumberpadActive;
         touchpadI2c.toggleNumpadState();
         if (isNumberpadActive) {
+          if (!config.numpadEnabledBellSoundPath.empty()) {
+            launchAndDisownChild("paplay " + config.numpadEnabledBellSoundPath);
+          }
           libevdev_grab(numberpadDevice, LIBEVDEV_GRAB);
-          Logger::success("Numberpad on. Grabbed numpad device");
+          Logger::success("Numberpad on. Grabbed touchpad device, no events will be propagated to any programs.");
           isNumberpadCanonicallyEnabled = true;
+          Logger::check("config.numpadEnabledBellSoundPath = " + config.numpadEnabledBellSoundPath);
         } else {
+          if (!config.numpadDisabledBellSoundPath.empty()) {
+            launchAndDisownChild("paplay " + config.numpadDisabledBellSoundPath);
+          }
           libevdev_grab(numberpadDevice, LIBEVDEV_UNGRAB);
-          Logger::success("Numberpad off. Ungrabbed numpad device");
+          Logger::success("Numberpad off. Ungrabbed touchpad device, events will be propagated to programs again");
           isNumberpadCanonicallyEnabled = false;
         }
         alreadyPerformedCurrentRegionAction = true;
@@ -205,6 +214,7 @@ void startNumberpadDriver(const std::string &configFilePath) {
         if (config.toggleOffOnIdle) {
           isNumberpadCanonicallyEnabled = false;
           libevdev_grab(numberpadDevice, LIBEVDEV_UNGRAB);
+          Logger::success("Ungrabbed touchpad device, events will be propagated to programs again");
         }
       }
     }
@@ -213,6 +223,15 @@ void startNumberpadDriver(const std::string &configFilePath) {
 
     if (config.profiles.empty()) {
       Logger::warning("No profiles found in config");
+      continue;
+    }
+
+    if (config.currentProfileName == "touchpad") {
+      isNumberpadActive = false;
+      touchpadI2c.turnOffNumpad();
+      isNumberpadCanonicallyEnabled = false;
+      libevdev_grab(numberpadDevice, LIBEVDEV_UNGRAB);
+      config.useProfile(config.profiles.begin()->name);
       continue;
     }
 
@@ -229,7 +248,7 @@ void startNumberpadDriver(const std::string &configFilePath) {
       Shape *shape = region.shape.get();
       if (isTouching && shape->contains(currentTouchPosition)) {
         if (lastTouchedArea != shape) {
-          Logger::check("last touched region is nyot the same, restarting timer");
+          // Logger::check("last touched region is nyot the same, restarting timer");
           alreadyPerformedCurrentRegionAction = false;
           currentRegionHoldTimeStart = std::chrono::steady_clock::now();
           lastTouchedArea = shape;
@@ -239,9 +258,9 @@ void startNumberpadDriver(const std::string &configFilePath) {
         auto elaspedMilliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(nyow - currentRegionHoldTimeStart).count();
         if (elaspedMilliseconds >= region.holdMilliseconds && !alreadyPerformedCurrentRegionAction && !region.performAfterRelease) {
           if (region.action.has_value()) {
-            Logger::check("performing action");
+            // Logger::check("performing action");
             region.action.value()();
-            Logger::check("Action performed");
+            // Logger::check("Action performed");
           }
           currentRegionHoldTimeStart = std::chrono::steady_clock::now();
           alreadyPerformedCurrentRegionAction = true;
@@ -280,7 +299,7 @@ void handleTouchEvents(
     isTouching = true;
     alreadyPerformedCurrentRegionAction = false;
     currentRegionHoldTimeStart = std::chrono::steady_clock::now();
-    Logger::check("Reseting hold timer as touch just started");
+    // Logger::check("Reseting hold timer as touch just started");
     Logger::log("Touch down");
     if (isNumberpadActive) {
       touchpadI2c.turnOnNumpad(false);
@@ -290,9 +309,10 @@ void handleTouchEvents(
       return;
     } else {
       if (!isNumberpadActive) return;
+      if (config.currentProfileName == "touchpad") goto endOfFunction;
       auto currentProfile = config.getProfile(config.currentProfileName);
       if (!currentProfile.has_value()) {
-        Logger::error("No profile found with name: " + config.currentProfileName);
+        Logger::error("Nyo profile found with name: " + config.currentProfileName);
         return;
       }
       const Profile &profile = currentProfile->get();
@@ -318,7 +338,7 @@ void handleTouchEvents(
     Logger::log("Touch up");
     isTouching = false;
     isTouchInNumlockZone = false;
-    if (isNumberpadActive && lastTouchedArea != nullptr) {
+    if (isNumberpadActive && lastTouchedArea != nullptr && config.currentProfileName != "touchpad") {
       auto currentProfile = config.getProfile(config.currentProfileName);
       if (currentProfile.has_value()) {
         for (auto &region : currentProfile->get().regions) {
@@ -341,9 +361,10 @@ void handleTouchEvents(
       }
     }
     currentRegionHoldTimeStart = std::chrono::steady_clock::now();
-    Logger::check("Resetting hold timer as touch is lifted up");
+    // Logger::check("Resetting hold timer as touch is lifted up");
     lastTouchedArea = nullptr;
   }
+  endOfFunction:
   if (isNumberpadCanonicallyEnabled) {
     touchpadI2c.turnOnNumpad(false);
     isNumberpadActive = true;

@@ -10,8 +10,9 @@
 #include <unistd.h>
 #include <vector>
 
-AsusTouchpadI2C::AsusTouchpadI2C(const std::string &i2cDevice, int i2cAddress) {
+void AsusTouchpadI2C::initialize(const std::string &i2cDevice, int i2cAddress, bool isGenericTouchpad) {
   this->i2cAddress = i2cAddress;
+  this->isGenericTouchpad = isGenericTouchpad;
   touchpadDeviceFileDescriptor = open(i2cDevice.c_str(), O_RDWR);
   if (touchpadDeviceFileDescriptor < 0) {
     Logger::error("Failed to open I2C bus");
@@ -23,12 +24,16 @@ AsusTouchpadI2C::AsusTouchpadI2C(const std::string &i2cDevice, int i2cAddress) {
   }
 }
 
+AsusTouchpadI2C::AsusTouchpadI2C() {}
+
 AsusTouchpadI2C::~AsusTouchpadI2C() {
   if (touchpadDeviceFileDescriptor < 0)
     close(touchpadDeviceFileDescriptor);
 }
 
 void AsusTouchpadI2C::setNumpadState(bool shouldEnable, bool log) {
+  if (isGenericTouchpad)
+    return;
   // clang-format off
   std::vector<uint8_t> payload = {
     0x05, 0x00, 0x3d, 0x03,
