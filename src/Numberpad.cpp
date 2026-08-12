@@ -135,10 +135,10 @@ void startNumberpadDriver(const std::string &configFilePath, std::string_view i2
       break;
     }
 
-    // Logger::log("currentRegionHoldTime elaspeed: " + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - currentRegionHoldTimeStart).count()));
-    // Logger::log("Time since last interaction: " + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - lastInteractionTime).count()));
-    // Logger::log("Touch zone: " + (lastTouchedArea == nullptr ? "null" : lastTouchedArea->toString()));
-    // Logger::check("Already performed current region action: " + std::to_string(alreadyPerformedCurrentRegionAction));
+    Logger::log("currentRegionHoldTime elaspeed: " + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - currentRegionHoldTimeStart).count()));
+    Logger::log("Time since last interaction: " + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - lastInteractionTime).count()));
+    Logger::log("Touch zone: " + (lastTouchedArea == nullptr ? "null" : lastTouchedArea->toString()));
+    Logger::check("Already performed current region action: " + std::to_string(alreadyPerformedCurrentRegionAction));
 
     std::chrono::duration timeSinceLastInteraction = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - lastInteractionTime);
     // Logger::check("Time since last interaction: " + std::to_string(timeSinceLastInteraction.count()) + "s");
@@ -177,7 +177,6 @@ void startNumberpadDriver(const std::string &configFilePath, std::string_view i2
     if (isTouching && config.activationRegion && config.activationRegion->contains(currentTouchPosition)) {
       Shape *numlockZone = config.activationRegion.get();
       if (lastTouchedArea != numlockZone) {
-        alreadyPerformedCurrentRegionAction = false;
         currentRegionHoldTimeStart = std::chrono::steady_clock::now();
         lastTouchedArea = numlockZone;
       }
@@ -204,6 +203,11 @@ void startNumberpadDriver(const std::string &configFilePath, std::string_view i2
         }
         alreadyPerformedCurrentRegionAction = true;
       }
+    }
+
+    if (!config.activationRegion->contains(currentTouchPosition)) {
+      alreadyPerformedCurrentRegionAction = false;
+      lastTouchedArea = nullptr;
     }
 
     if (isNumberpadActive && config.idleTimeoutSeconds > 0) {
@@ -324,7 +328,7 @@ void handleTouchEvents(
         Shape *shape = region.shape.get();
         if (shape->contains(currentTouchPosition)) {
           if (region.holdMilliseconds <= 0 && !region.performAfterRelease) {
-            if (region.action.has_value()) {
+            if (region.action.has_value() && !alreadyPerformedCurrentRegionAction) {
               region.action.value()();
               alreadyPerformedCurrentRegionAction = true;
             }
