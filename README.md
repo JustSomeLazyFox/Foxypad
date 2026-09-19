@@ -1,6 +1,12 @@
 # Foxypad
 A device driver for Asus laptops with Numberpad support and experimental support for generic touchpads on any laptop
 
+##Dependencies
+sol2 is used as C++ Lua wrapper. Installation on Arch Linux (and derivatives)
+```bash
+yay -S sol2
+```
+
 ## Installation
 Clone this repo, and make the binary
 
